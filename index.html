@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset=utf-8><title>SenseAgri Backlog</title><meta name=viewport content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f3;color:#1d2b1f}header{background:#2f6b3a;color:#fff;padding:16px 24px}h1{margin:0;font-size:22px}small{opacity:.8}main{padding:20px 24px}.row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}.card{background:#fff;border-radius:8px;padding:12px 16px;box-shadow:0 1px 3px #0002;min-width:150px}.card b{font-size:22px;display:block}.board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.col{background:#e7ece5;border-radius:8px;padding:10px;min-height:120px}.col h3{margin:4px 0 10px;font-size:15px}.it{background:#fff;border-radius:6px;padding:8px;margin-bottom:8px;font-size:13px;border-left:4px solid #8a8}.it.Critical{border-color:#b00020}.it.High{border-color:#d0703a}.it a{color:#1d2b1f;text-decoration:none;font-weight:600}.meta{color:#667;font-size:11px;margin-top:3px}.note{color:#866;font-size:13px;margin:3px 0}select{padding:6px;font-size:14px}h2{font-size:17px;margin:22px 0 8px}.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px}.charts .card{min-height:260px}table{border-collapse:collapse;font-size:13px}td,th{padding:4px 8px;border-bottom:1px solid #ddd;text-align:left}</style><script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script></head><body>
+<header><h1>SenseAgri AI · Backlog dashboard</h1><small id=upd></small></header><main>
+<div class=row><label>Project: <select id=f><option value="">All projects</option></select></label></div>
+<div class=row id=sum></div><h2>Status board</h2><div class=board id=board></div>
+<div class=card style="margin-top:10px;border-left:5px solid #d0703a"><h2>Needs you</h2><div id=nu></div></div><div class=row style="margin-top:10px"><div class=card style="flex:1"><h2>Upcoming deadlines</h2><div id=dl></div></div><div class=card style="flex:1"><h2>Blocked</h2><div id=bl></div></div></div>
+<h2>Analytics</h2><div class=charts>
+<div class=card><b style="font-size:15px">Tickets completed per week</b><canvas id=c1></canvas></div>
+<div class=card><b style="font-size:15px">Opened vs closed per week</b><canvas id=c2></canvas></div>
+<div class=card><b style="font-size:15px">Per project (open / done)</b><canvas id=c3></canvas></div>
+<div class=card><b style="font-size:15px">Token usage</b><div id=tok></div><canvas id=c4></canvas></div></div>
+<h2>Gaps / notes</h2><div id=notes></div><p class=note id=arc></p></main>
+<script>
+const S=["Backlog","In progress","Blocked","Done"];let D;
+fetch('backlog.json?'+Date.now()).then(r=>r.json()).then(d=>{D=d;upd.textContent='Last updated: '+d.last_updated;d.projects.forEach(p=>f.add(new Option(p,p)));f.onchange=draw;draw()});
+const card=i=>`<div class="it ${i.priority}">${i.source.startsWith("http")?`<a href="${i.source}" target=_blank>${i.title}</a>`:`<b>${i.title}</b>`}<div class=meta>${i.project} · ${i.id} · ${i.priority}${i.due?' · due '+i.due:''}${i.estimate?' · est '+i.estimate:''}${i.note?' · '+i.note:''}${i.source.startsWith('http')?'':' · '+i.source} · upd ${i.updated}</div></div>`;
+
+const CH={};function mk(id,cfg){CH[id]&&CH[id].destroy();CH[id]=new Chart(document.getElementById(id),cfg)}
+function wk(d){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7));return t.toISOString().slice(0,10)}
+function weeks(a){if(!a.length)return[];const s=new Date(a[0]+'T00:00:00Z'),e=new Date(a[a.length-1]+'T00:00:00Z'),r=[];for(;s<=e;s.setUTCDate(s.getUTCDate()+7))r.push(s.toISOString().slice(0,10));return r}
+function analytics(its){
+ const cnt=(arr)=>arr.reduce((m,w)=>(m[w]=(m[w]||0)+1,m),{});
+ const all=[...its,...(D.archived||[]).filter(i=>!f.value||i.project==f.value)];const op=all.filter(i=>i.created).map(i=>wk(i.created)),cl=all.filter(i=>i.completed).map(i=>wk(i.completed));
+ const W=weeks([...op,...cl].sort()),O=cnt(op),C=cnt(cl),opt={animation:false,scales:{y:{beginAtZero:true,ticks:{precision:0}}}};
+ mk('c1',{type:'bar',data:{labels:W,datasets:[{label:'Completed',data:W.map(w=>C[w]||0),backgroundColor:'#2f6b3a'}]},options:opt});
+ mk('c2',{type:'line',data:{labels:W,datasets:[{label:'Opened',data:W.map(w=>O[w]||0),borderColor:'#d0703a'},{label:'Closed',data:W.map(w=>C[w]||0),borderColor:'#2f6b3a'}]},options:opt});
+ const P=D.projects.filter(p=>!f.value||p==f.value);
+ mk('c3',{type:'bar',data:{labels:P,datasets:[{label:'Open',data:P.map(p=>D.items.filter(i=>i.project==p&&i.status!='Done').length),backgroundColor:'#d0703a'},{label:'Done',data:P.map(p=>D.items.filter(i=>i.project==p&&i.status=='Done').length),backgroundColor:'#2f6b3a'}]},options:{...opt,scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{precision:0}}}}});
+ const T=(D.token_usage||[]).filter(t=>!f.value||t.project==f.value);
+ if(!T.length){tok.innerHTML='<p class=note>No token data yet.</p>';CH.c4&&CH.c4.destroy();c4.style.display='none';return}
+ c4.style.display='';const by={};T.forEach(t=>by[t.date]=(by[t.date]||0)+(+t.tokens||0));const ds=Object.keys(by).sort();
+ const ag={};T.forEach(t=>ag[t.agent]=(ag[t.agent]||0)+(+t.tokens||0));
+ tok.innerHTML='<table><tr><th>Agent</th><th>Tokens</th></tr>'+Object.entries(ag).map(([a,n])=>`<tr><td>${a}</td><td>${n.toLocaleString()}</td></tr>`).join('')+'</table>';
+ mk('c4',{type:'bar',data:{labels:ds,datasets:[{label:'Tokens',data:ds.map(d=>by[d]),backgroundColor:'#4a7fb5'}]},options:opt})}
+function draw(){const its=D.items.filter(i=>!f.value||i.project==f.value);
+sum.innerHTML=D.projects.filter(p=>!f.value||p==f.value).map(p=>{const x=D.items.filter(i=>i.project==p);return `<div class=card>${p}<b>${x.filter(i=>i.status!='Done').length} open</b><span class=meta>${S.map(s=>s+': '+x.filter(i=>i.status==s).length).join(' · ')}</span></div>`}).join('');
+board.innerHTML=S.map(s=>{const x=its.filter(i=>i.status==s);return `<div class=col><h3>${s} (${x.length})</h3>${x.map(card).join('')}</div>`}).join('');
+const d=its.filter(i=>i.due&&i.status!='Done').sort((a,b)=>a.due.localeCompare(b.due));dl.innerHTML=d.length?d.map(card).join(''):'<p class=note>No due dates set yet.</p>';
+const u=its.filter(i=>i.needs_user&&i.status!='Done');nu.innerHTML=u.length?u.map(i=>card(i).replace('</div></div>',' · owner '+i.owner+'</div></div>')).join(''):'<p class=note>Nothing waiting on you.</p>';const b=its.filter(i=>i.status=='Blocked');bl.innerHTML=b.length?b.map(card).join(''):'<p class=note>Nothing blocked.</p>';
+notes.innerHTML=Object.entries(D.notes).filter(([p])=>!f.value||p==f.value).map(([p,n])=>`<p class=note><b>${p}:</b> ${n}</p>`).join('');arc.textContent=(D.archived||[]).length+' older items archived (kept in backlog.json, used in charts only).';if(window.Chart)analytics(its)}
+</script></body></html>
